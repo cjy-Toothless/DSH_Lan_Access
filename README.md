@@ -95,7 +95,9 @@ New-NetFirewallRule -DisplayName "DSH LAN Access 63004" -Direction Inbound -Loca
 
 ## 故障与恢复（重要）
 
-- **诊断文件**：`$DSH_HOME/lan-access/diagnostics.json` 记录最近一次启动/停止阶段、实际监听地址、候选网卡与错误原因；排障先看它。
+- **诊断文件**：`$DSH_HOME/lan-access/diagnostics.json` 记录最近一次启动/停止阶段、实际监听地址、候选网卡与错误原因；
+  `$DSH_HOME/lan-access/requests.log` 记录最近的入站连接/请求/响应（含远端 IP、Host、UA、状态码，超过 512KB 轮换为 `.1`），
+  手机连不上时先看它是否出现手机 IP 的 `connection`/`request` 行，以区分“请求没到电脑”还是“到了但响应异常”。
 - **设置页不显示 / 无法读取状态**：说明 Connection RPC 注册失败（反代本身仍工作）。查看 DSH 日志中的 `[dsh-lan-access]` 行；重启 DSH 后若仍失败，反馈该行文本。
 - **如果 DSH 启动失败或崩溃循环**：先把本插件从 profile 隔离——
   1. 编辑 `$DSH_HOME/profiles/desktop/package.json`，从 `dsh.profile.bundles` 数组移除 `"@local/dsh-lan-access"`（保留 `dependencies` 无妨）；

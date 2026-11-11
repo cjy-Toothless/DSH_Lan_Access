@@ -5,7 +5,7 @@
  * 通过 Connection RPC 暴露状态与设置更新接口，并向 DSH 页面注入非安全上下文 polyfill。
  * 监听器的创建/销毁全部挂在 Cordis effect 上，插件卸载即释放端口与全部连接。
  */
-import { mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 
@@ -177,6 +177,31 @@ async function setup(ctx, config) {
     return;
   }
 
+  /**
+   * 请求诊断日志：记录入站连接 / 请求 / 响应 / 客户端错误，便于排查"手机连不上、空响应"。
+   * 写入 `$DSH_HOME/lan-access/requests.log`，超过 512KB 轮换为 `.1`；失败绝不影响代理。
+   * @param {object} entry - 事件条目。
+   */
+  let requestLogQueue = Promise.resolve();
+  function writeRequestLog(entry) {
+    requestLogQueue = requestLogQueue
+      .then(async () => {
+        const directory = path.join(resolveDshHome(), 'lan-access');
+        await mkdir(directory, { recursive: true });
+        const file = path.join(directory, 'requests.log');
+        try {
+          const info = await stat(file);
+          if (info.size > 512 * 1024) await rename(file, path.join(directory, 'requests.log.1'));
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
+        await appendFile(file, `${new Date().toISOString()} ${JSON.stringify(entry)}\n`, 'utf8');
+      })
+      .catch(() => {
+        // 诊断日志失败不能影响代理。
+      });
+  }
+
   const upstream = resolveUpstream(webServer, log);
   const configDefaults = normalizeSettings(config ?? {}, { ...defaultSettings(), listenPort: DEFAULT_LISTEN_PORT });
 
@@ -295,6 +320,7 @@ async function setup(ctx, config) {
         upstreamHost: upstream.host,
         upstreamPort: upstream.port,
         getLaunchToken: () => readLaunchToken(connection),
+        onEvent: writeRequestLog,
         log,
       });
       const url = `http://${listener.host}:${listener.port}/`;

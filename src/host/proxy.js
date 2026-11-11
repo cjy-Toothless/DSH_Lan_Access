@@ -354,6 +354,7 @@ export function createProxyServer(options) {
     browserOrigin: '',
     getLaunchToken: options.getLaunchToken,
     log: options.log,
+    onEvent: options.onEvent,
     agent: new http.Agent({ keepAlive: true }),
     upgradedSockets: new Set(),
     listeningSockets: new Set(),
@@ -363,6 +364,18 @@ export function createProxyServer(options) {
   };
 
   const server = http.createServer((request, response) => {
+    state.onEvent?.({
+      kind: 'request',
+      remote: request.socket.remoteAddress,
+      method: request.method,
+      url: request.url,
+      host: request.headers.host,
+      ua: request.headers['user-agent'],
+      referer: request.headers.referer,
+    });
+    response.once('finish', () => {
+      state.onEvent?.({ kind: 'response', method: request.method, url: request.url, status: response.statusCode });
+    });
     handleHttpRequest(request, response, state).catch((error) => {
       state.log?.('error', `请求处理失败：${error instanceof Error ? error.message : String(error)}`);
       writeText(response, 502, '502 Bad Gateway');
@@ -378,6 +391,13 @@ export function createProxyServer(options) {
   });
 
   server.on('upgrade', (request, socket, head) => {
+    state.onEvent?.({
+      kind: 'upgrade',
+      remote: socket.remoteAddress,
+      url: request.url,
+      host: request.headers.host,
+      ua: request.headers['user-agent'],
+    });
     try {
       handleUpgrade(request, socket, head, state);
     } catch (error) {
@@ -388,10 +408,12 @@ export function createProxyServer(options) {
 
   server.on('connection', (socket) => {
     state.listeningSockets.add(socket);
+    state.onEvent?.({ kind: 'connection', remote: socket.remoteAddress, remotePort: socket.remotePort });
     socket.on('close', () => state.listeningSockets.delete(socket));
   });
 
   server.on('clientError', (error, socket) => {
+    state.onEvent?.({ kind: 'client-error', remote: socket.remoteAddress, code: error.code, message: error.message });
     if (socket.writable) {
       socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
     } else {
