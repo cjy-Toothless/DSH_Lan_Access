@@ -5,8 +5,16 @@
   "description": "DSH 局域网访问插件：在桌面版进程内提供 HTTP/WebSocket 反向代理，手机浏览器可直接使用 DSH Web GUI。",
   "type": "module",
   "main": "src/host/index.js",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "author": "dsh-lan-access contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cjy-Toothless/DSH_Lan_Access.git"
+  },
+  "homepage": "https://github.com/cjy-Toothless/DSH_Lan_Access#readme",
+  "bugs": {
+    "url": "https://github.com/cjy-Toothless/DSH_Lan_Access/issues"
+  },
   "keywords": [
     "dsh",
     "deepseek-harness",

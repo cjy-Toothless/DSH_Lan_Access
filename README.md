@@ -2,6 +2,8 @@
 
 > 让手机浏览器在局域网内直接打开并使用**电脑上的 DSH**（DeepSeek Harness 桌面版）——扫码即用，无需改 DSH 源码、无需单独进程。
 
+**仓库**：<https://github.com/cjy-Toothless/DSH_Lan_Access>
+
 **项目状态**：v0.1 已实现、安装，并在真实 DSH 0.2.2-rc.1 桌面版与 Android 手机上完成端到端验证（2026-11-12）。本插件为本地 DSH bundle，按仓库内 `docs/contract.md` 契约实现；开发中曾因插件加载方式错误导致宿主崩溃，根因与修复约束见 [`docs/adr/0002-safe-plugin-loading.md`](docs/adr/0002-safe-plugin-loading.md)，**修改 `src/host/index.js` 的加载逻辑前务必先读**。
 
 ---
@@ -55,18 +57,22 @@ DSH 桌面版出于安全考虑，把浏览器入口硬编码在 `127.0.0.1` 的
 
 ## 安装
 
-### 方式 A：插件管理器（推荐）
+### 方式 A：从 GitHub 克隆后安装（推荐）
 
-本项目是标准 DSH bundle，在 DSH 插件管理器中安装本目录即可：
+```powershell
+git clone https://github.com/cjy-Toothless/DSH_Lan_Access.git
+```
 
-- 桌面版：插件面板 →「添加插件」→ 选择本地绝对路径 `...\default-workspace\dsh-lan-access`；
-- 或在 DSH 内由 Agent 调用 `plugin_manager` 的 `install_bundle`，target 传本目录绝对路径。
+本项目是标准 DSH bundle，在 DSH 插件管理器中安装克隆下来的目录即可：
+
+- 桌面版：插件面板 →「添加插件」→ 选择该目录的绝对路径；
+- 或在 DSH 内由 Agent 调用 `plugin_manager` 的 `install_bundle`，target 传该目录绝对路径。
 
 安装后**重启 DSH**（或等待 HMR 生效），设置 → **局域网访问** 即出现入口。
 
-### 方式 B：开发期本地联调
+### 方式 B：本地目录 / 开发期联调
 
-修改本项目源码后，重新执行安装/重载即可；Host 代码变化需要重启 DSH 才会加载新模块。
+直接选择本机已 checkout 的 `dsh-lan-access` 目录安装；修改源码后重新执行安装/重载即可，Host 代码变化需要重启 DSH 才会加载新模块。
 
 ## 使用
 
@@ -157,6 +163,8 @@ npm run check   # node --check：全部 Host/Client 源码语法检查
 
 ## 许可
 
-MIT。第三方组件许可见 [`src/vendor/NOTICE.md`](src/vendor/NOTICE.md)。
+本项目以 **GPL-3.0-or-later** 发布，许可证全文见 [`LICENSE`](LICENSE)。
+
+第三方组件：二维码生成器 `qrcode-generator` 以 MIT 许可 vendored，声明见 [`src/vendor/NOTICE.md`](src/vendor/NOTICE.md)；MIT 与 GPL-3.0 兼容，随本项目一并分发。
 
 > 本项目与 DeepSeek 官方无关；DSH 本体版权归其作者所有。

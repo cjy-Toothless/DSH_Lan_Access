@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36" role="img" aria-label="LAN access">
-  <!-- Original artwork for @local/dsh-lan-access, released under the project MIT license.
+  <!-- Original artwork for @local/dsh-lan-access, released under the project GPL-3.0-or-later license.
        Self-colored on purpose: the plugin manager renders manifest icons through <img>,
        where `currentColor` resolves to black instead of the surrounding theme color. -->
   <defs>
