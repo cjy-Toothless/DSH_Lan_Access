@@ -267,7 +267,11 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** 空状态占位图：手机 + Wi-Fi 波（与 assets/icon.svg 同一意象）。 */
+    /**
+     * 空状态占位图：手机 + Wi-Fi 波（与 assets/icon.svg 同一意象）。
+     * 内联渲染，因此使用 currentColor 跟随主题；导出的 icon.svg 不能这么做
+     * （插件管理器以 <img> 展示，currentColor 会解析成黑色）。
+     */
     function PhoneWavesIcon() {
       return h(
         'svg',
@@ -280,13 +284,12 @@ window.__ModuleLoader__.load({
           strokeLinejoin: 'round',
           'aria-hidden': 'true',
         },
-        h('rect', { x: 2.5, y: 4, width: 8, height: 16, rx: 1.8 }),
-        h('path', { d: 'M5.2 6.6h2.6' }),
-        h('circle', { cx: 6.5, cy: 17.4, r: 0.7, fill: 'currentColor', stroke: 'none' }),
-        h('circle', { cx: 17.5, cy: 17.5, r: 0.9, fill: 'currentColor', stroke: 'none' }),
-        h('path', { d: 'M14.95 14.95a3.6 3.6 0 0 1 5.1 0' }),
-        h('path', { d: 'M13.12 13.12a6.2 6.2 0 0 1 8.76 0' }),
-        h('path', { d: 'M11.28 11.28a8.8 8.8 0 0 1 12.44 0' }),
+        h('rect', { x: 3, y: 4, width: 7.8, height: 16, rx: 2 }),
+        h('path', { d: 'M5.3 6.9h3.2' }),
+        h('circle', { cx: 6.9, cy: 17.4, r: 0.8, fill: 'currentColor', stroke: 'none' }),
+        h('circle', { cx: 17.1, cy: 16.2, r: 1.05, fill: 'currentColor', stroke: 'none' }),
+        h('path', { d: 'M14.7 13.8a3.4 3.4 0 0 1 4.8 0' }),
+        h('path', { d: 'M13 12.1a5.8 5.8 0 0 1 8.2 0' }),
       );
     }
 
