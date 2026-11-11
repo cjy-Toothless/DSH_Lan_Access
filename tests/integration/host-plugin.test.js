@@ -24,6 +24,37 @@ function randomPort() {
 }
 
 /**
+ * 轮询等待条件成立。
+ * @param {() => Promise<boolean>} predicate - 条件。
+ * @param {number} [timeoutMs] - 超时毫秒。
+ * @returns {Promise<boolean>} 是否在超时前成立。
+ */
+async function waitUntil(predicate, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  return false;
+}
+
+/**
+ * 启动一个临时 HTTP 服务（用于模拟被占用的端口）。
+ * @param {(req: http.IncomingMessage, res: http.ServerResponse) => void} handler - 请求处理器。
+ * @returns {Promise<{ server: http.Server, port: number }>} 服务句柄。
+ */
+function startUpstream(handler) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer(handler);
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      resolve({ server, port: typeof address === 'object' && address !== null ? address.port : 0 });
+    });
+  });
+}
+
+/**
  * 启动模拟 DSH 上游：要求 token 兑换后携带 Cookie。
  * @returns {Promise<{ server: http.Server, port: number }>} 服务句柄。
  */
@@ -195,13 +226,34 @@ test('apply() 可启动监听、完成 token 登录、响应 RPC 并在卸载时
     assert.equal(second.status, 200);
     assert.ok(second.body.includes('fake dsh'));
 
-    // 更新端口：持久化并立即生效
+    // 更新端口：RPC 先返回（避免经反代保存时响应被随后的重启切断），监听器延迟重启
     const nextPort = randomPort();
     const updated = await rpcHandler('update', { listenPort: nextPort });
-    assert.equal(updated.ok, true);
-    assert.equal(updated.value.listenPort, nextPort);
+    assert.equal(updated.ok, true, JSON.stringify(updated));
+    assert.equal(updated.value.restarting, true);
+    const switched = await waitUntil(async () => {
+      const status = await rpcHandler('status', {});
+      return status.ok === true && status.value.running === true && status.value.listenPort === nextPort;
+    });
+    assert.equal(switched, true, '监听器应在延迟后切换到新端口');
     const viaNewPort = await fetchOnce(nextPort, '/');
     assert.equal(viaNewPort.status, 302);
+
+    // 被占用端口：保存前探测直接拒绝，且旧监听器保持可用
+    const blocker = await startUpstream((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.end('occupied');
+    });
+    try {
+      const occupied = await rpcHandler('update', { listenPort: blocker.port });
+      assert.equal(occupied.ok, false);
+      assert.match(String(occupied.error?.message ?? ''), /占用/);
+      const stillRunning = await rpcHandler('status', {});
+      assert.equal(stillRunning.value.listenPort, nextPort);
+      assert.equal(stillRunning.value.running, true);
+    } finally {
+      await new Promise((resolve) => blocker.server.close(resolve));
+    }
 
     // 非法参数：返回错误信封且旧监听器保持可用
     const rejected = await rpcHandler('update', { listenPort: 80 });

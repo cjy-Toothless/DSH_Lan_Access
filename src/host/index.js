@@ -6,6 +6,7 @@
  * 监听器的创建/销毁全部挂在 Cordis effect 上，插件卸载即释放端口与全部连接。
  */
 import { mkdir, writeFile } from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 
 import {
@@ -19,7 +20,7 @@ import {
 } from './contract.js';
 import { isBindableListenHost, listLanAddresses, pickLanAddress } from './network.js';
 import { injectInsecureContextPolyfills } from './polyfills.js';
-import { startLanProxy, stripIpv6Brackets } from './proxy.js';
+import { startLanProxy, stripIpv6Brackets, closeOrphanedListeners } from './proxy.js';
 import { qrSvgFor } from './qr.js';
 import {
   defaultSettings,
@@ -82,6 +83,35 @@ function resolveUpstream(webServer, log) {
     return { origin: `http://127.0.0.1:${fallbackPort}`, host: '127.0.0.1', port: fallbackPort };
   }
   return null;
+}
+
+/**
+ * 探测某个 host:port 当前是否可绑定（用于保存设置前阻止占用端口）。
+ * @param {string} host - 监听地址。
+ * @param {number} port - 端口。
+ * @returns {Promise<boolean>} 可绑定返回 true。
+ */
+function canBindAddress(host, port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try {
+        probe.close(() => resolve(result));
+      } catch (error) {
+        resolve(result);
+      }
+    };
+    probe.once('error', () => finish(false));
+    probe.once('listening', () => finish(true));
+    try {
+      probe.listen(port, host);
+    } catch (error) {
+      finish(false);
+    }
+  });
 }
 
 /**
@@ -237,20 +267,25 @@ async function setup(ctx, config) {
   async function startListener() {
     lastError = null;
     if (!settings.enabled) return;
+    // 先回收同一模块实例内可能遗留的监听器（异常/HMR 路径的自愈），避免端口自占用。
+    await closeOrphanedListeners();
     if (upstream === null) {
       lastError = '无法确定 DSH 自身监听地址，局域网访问未启动';
       log('error', lastError);
+      await writeDiagnostics('start-failed');
       return;
     }
     const listenHost = settings.listenHost !== '' ? settings.listenHost : pickLanAddress();
     if (listenHost === '') {
       lastError = '未发现可用的局域网 IPv4 地址，请先把电脑接入 Wi-Fi 或网线';
       log('warn', lastError);
+      await writeDiagnostics('start-failed');
       return;
     }
     if (!isBindableListenHost(listenHost)) {
       lastError = `监听地址不是可绑定的具体 IPv4：${listenHost}`;
       log('error', lastError);
+      await writeDiagnostics('start-failed');
       return;
     }
     try {
@@ -265,11 +300,13 @@ async function setup(ctx, config) {
       const url = `http://${listener.host}:${listener.port}/`;
       log('info', `局域网访问已启动：${url} → ${upstream.origin}`);
       log('warn', '当前为免认证模式：同一局域网内任何设备都可访问并操作 DSH');
+      await writeDiagnostics('started');
     } catch (error) {
       listener = null;
       const reason = error instanceof Error ? error.message : String(error);
       lastError = `监听 ${listenHost}:${settings.listenPort} 失败：${reason}`;
       log('error', lastError);
+      await writeDiagnostics('start-failed');
     }
   }
 
@@ -299,6 +336,49 @@ async function setup(ctx, config) {
     return task;
   }
 
+  /** 待执行的延迟重启定时器。 */
+  let pendingRestartTimer = null;
+
+  /**
+   * 延迟重启监听器（默认 300ms），让当前 RPC 的 HTTP 响应先写回浏览器。
+   *
+   * 为什么必须延迟：设置页从局域网地址访问时，`update` / `restart` 的响应本身
+   * 也要经过这个监听器；若在 handler 返回前关闭监听器，浏览器会收到空响应
+   * （Chromium 报 `ERR_EMPTY_RESPONSE`，页面显示设置失败）。
+   * @param {object} [options] - 选项。
+   * @param {{ enabled: boolean, listenHost: string, listenPort: number }} [options.fallback] - 启动失败时回滚到的配置。
+   * @param {number} [options.delayMs] - 延迟毫秒数。
+   */
+  function scheduleRestart(options = {}) {
+    const delayMs = options.delayMs ?? 300;
+    if (pendingRestartTimer !== null) return;
+    pendingRestartTimer = setTimeout(() => {
+      pendingRestartTimer = null;
+      void queueRestart()
+        .then(async () => {
+          if (options.fallback === undefined) return;
+          if (settings.enabled === true && listener === null) {
+            // 延迟启动失败：回滚到上一份可用配置并恢复监听，避免“已保存但不可用”。
+            const reason = lastError ?? '未知原因';
+            settings = options.fallback;
+            try {
+              await saveSettings(settings);
+            } catch (error) {
+              log('warn', `回滚设置写入失败：${error instanceof Error ? error.message : String(error)}`);
+            }
+            await queueRestart();
+            lastError = `设置未生效，已回滚：${reason}`;
+            log('warn', lastError);
+            await writeDiagnostics('rolled-back');
+          }
+        })
+        .catch((error) => {
+          log('error', `延迟重启失败：${error instanceof Error ? error.message : String(error)}`);
+        });
+    }, delayMs);
+    pendingRestartTimer.unref?.();
+  }
+
   /** 先注册卸载清理：即使后续注册失败，监听器也会在插件卸载时释放。 */
   ctx.effect(() => () => stopListener(), 'dsh-lan-access.listener');
 
@@ -309,9 +389,8 @@ async function setup(ctx, config) {
     log('warn', `polyfill 注入注册失败（不影响反代）：${error instanceof Error ? error.message : String(error)}`);
   }
 
-  /** 首次启动：先完成一次监听尝试，再写诊断快照。 */
+  /** 首次启动：startListener 内部会写诊断快照。 */
   await startListener();
-  await writeDiagnostics('started');
 
   /**
    * Connection RPC 处理器。
@@ -323,17 +402,28 @@ async function setup(ctx, config) {
     try {
       if (endpoint === RPC_STATUS) return success(buildStatus());
       if (endpoint === RPC_RESTART) {
-        await queueRestart();
-        return success(buildStatus());
+        scheduleRestart();
+        return success({ ...buildStatus(), restarting: true });
       }
       if (endpoint === RPC_UPDATE) {
         const validation = validateSettingsPatch(payload, settings);
         if (validation.ok === false) return failure('bad-request', validation.message);
-        await saveSettings(validation.value);
-        settings = validation.value;
-        log('info', '设置已保存，正在重启局域网监听器');
-        await queueRestart();
-        return success(buildStatus());
+        const next = validation.value;
+        const targetHost = next.listenHost !== '' ? next.listenHost : pickLanAddress();
+        const sameAuthority = listener !== null && listener.host === targetHost && listener.port === next.listenPort;
+        if (next.enabled) {
+          if (targetHost === '') return failure('bad-request', '未发现可用的局域网 IPv4 地址');
+          if (sameAuthority === false && (await canBindAddress(targetHost, next.listenPort)) === false) {
+            return failure('bad-request', `端口 ${targetHost}:${next.listenPort} 已被占用，请换一个端口`);
+          }
+        }
+        const previous = settings;
+        await saveSettings(next);
+        settings = next;
+        log('info', '设置已保存，监听器将在响应返回后重启');
+        // 先返回响应，再在 300ms 后重启监听器（否则经局域网页保存会得到空响应）。
+        scheduleRestart({ fallback: previous });
+        return success({ ...buildStatus(), restarting: true });
       }
       return failure('bad-request', `未知 RPC 端点：${String(endpoint)}`);
     } catch (error) {

@@ -79,7 +79,9 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
 - 设置写入 `$DSH_HOME/lan-access/settings.json`（临时文件 + `rename` 原子替换）；
 - Host 通过 `connection.register(owner, '/dsh-lan-access', handler)`（owner = 已注入 `webServer` 的上下文）暴露 `status` / `update` / `restart`；
 - Client 通过 `ctx.connection.rpc.call(...)` 调用，契约见 `docs/contract.md`；
-- 修改端口/开关后 Host 立即重启监听器（无需重启 DSH），返回最新状态。
+- 修改端口/开关后 Host 立即重启监听器（无需重启 DSH），返回最新状态。**注意响应优先**：由于设置页
+  可能经局域网反代访问，`update`/`restart` 会先返回响应、再由约 300ms 后的延迟任务重启监听器，
+  否则关闭监听器会切断正在返回的响应，浏览器得到 `ERR_EMPTY_RESPONSE`；延迟重启失败会自动回滚配置。
 
 ## 5. 失败与安全
 
@@ -89,7 +91,9 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
 - 请求路径必须 `/` 开头；请求头由 Node 校验，改写值均为常量或同源 prefix 替换；
 - **入站 Host/Origin 校验**：只接受本代理自身 authority（监听 IP:端口 / 127.0.0.1:端口 / localhost:端口），
   其余返回 403（含 WebSocket 升级），用于阻断 DNS rebinding 放大自动 token 登录；监听地址拒绝 `0.0.0.0`/广播/链路本地；
-- **重启串行化**：`update`/`restart` 经同一个 Promise 队列串行执行，避免并发 stop/start 泄漏监听器；
+- **重启串行化 + 响应优先**：`update`/`restart` 经同一个 Promise 队列串行执行，且先返回响应、延迟约 300ms 再重启，
+  避免并发 stop/start 泄漏监听器，也避免经反代保存时响应被重启切断（`ERR_EMPTY_RESPONSE`）；
+- **端口预检与回滚**：保存前探测目标端口是否可绑定（被占用直接拒绝且不改运行状态）；延迟启动失败自动回滚配置；
 - **免认证暴露面**：当前无额外认证，等效于把 DSH 暴露给同局域网；总开关默认开启但可在设置页关闭，风险提示常驻设置页。
 
 ## 6. 插件加载安全契约（事故后强制约束）

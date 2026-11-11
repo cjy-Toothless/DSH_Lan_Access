@@ -403,6 +403,42 @@ export function createProxyServer(options) {
   return { server, state };
 }
 
+/** 本模块实例创建过的全部代理句柄；用于清理同一模块实例内可能遗留的监听器。 */
+const liveListeners = new Set();
+
+/**
+ * 关闭本模块实例遗留的所有监听器（正常应为空；用于 HMR/异常路径的自愈）。
+ * @returns {Promise<void>} 清理完成。
+ */
+export async function closeOrphanedListeners() {
+  const handles = [...liveListeners];
+  liveListeners.clear();
+  for (const handle of handles) {
+    try {
+      await handle.close();
+    } catch (error) {
+      // 孤儿监听器清理失败不能影响新实例启动。
+    }
+  }
+}
+
+/** EADDRINUSE 时的绑定重试次数（Windows 上停止后立即重绑偶发占用）。 */
+const BIND_RETRY_ATTEMPTS = 10;
+/** 两次绑定重试之间的等待时间。 */
+const BIND_RETRY_DELAY_MS = 200;
+
+/**
+ * 延迟指定毫秒。
+ * @param {number} ms - 毫秒。
+ * @returns {Promise<void>} 计时结束。
+ */
+function delay(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
+
 /**
  * 启动局域网反代并等待端口绑定完成。
  * @param {object} options - 启动选项。
@@ -416,19 +452,36 @@ export function createProxyServer(options) {
  */
 export async function startLanProxy(options) {
   const { server, state } = createProxyServer(options);
-  await new Promise((resolve, reject) => {
-    const onError = (error) => {
-      server.off('listening', onListening);
-      reject(error);
-    };
-    const onListening = () => {
-      server.off('error', onError);
-      resolve();
-    };
-    server.once('error', onError);
-    server.once('listening', onListening);
-    server.listen(options.listenPort, options.listenHost);
-  });
+  let bound = false;
+  let lastBindError;
+  for (let attempt = 1; attempt <= BIND_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await new Promise((resolve, reject) => {
+        const onError = (error) => {
+          server.off('listening', onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.off('error', onError);
+          resolve();
+        };
+        server.once('error', onError);
+        server.once('listening', onListening);
+        server.listen(options.listenPort, options.listenHost);
+      });
+      bound = true;
+      break;
+    } catch (error) {
+      lastBindError = error;
+      if (error?.code !== 'EADDRINUSE' || attempt === BIND_RETRY_ATTEMPTS) break;
+      options.log?.('warn', `端口 ${options.listenPort} 暂被占用，${BIND_RETRY_DELAY_MS}ms 后重试（${attempt}/${BIND_RETRY_ATTEMPTS}）`);
+      await delay(BIND_RETRY_DELAY_MS);
+    }
+  }
+  if (!bound) {
+    state.agent.destroy();
+    throw lastBindError ?? new Error(`无法监听 ${options.listenHost}:${options.listenPort}`);
+  }
   const address = server.address();
   const boundPort = typeof address === 'object' && address !== null ? address.port : options.listenPort;
   const boundHost = options.listenHost;
@@ -438,24 +491,35 @@ export async function startLanProxy(options) {
     state.allowedAuthorities.add(`${urlHost(host)}:${boundPort}`.toLowerCase());
   }
 
-  return {
+  const handle = {
     host: boundHost,
     port: boundPort,
     close: async () => {
+      liveListeners.delete(handle);
       for (const socket of state.upgradedSockets) socket.destroy();
       state.upgradedSockets.clear();
       for (const socket of state.listeningSockets) socket.destroy();
       state.listeningSockets.clear();
       state.agent.destroy();
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, 1000);
+      const closed = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(false), 3000);
         timer.unref?.();
+        try {
+          server.closeAllConnections?.();
+          server.closeIdleConnections?.();
+        } catch (error) {
+          // 忽略清理辅助 API 的异常，仍以 close 回调为准。
+        }
         server.close(() => {
           clearTimeout(timer);
-          resolve();
+          resolve(true);
         });
-        server.closeAllConnections?.();
       });
+      if (!closed) {
+        state.log?.('warn', `监听器关闭超时（${boundHost}:${boundPort}），端口可能延迟释放`);
+      }
     },
   };
+  liveListeners.add(handle);
+  return handle;
 }

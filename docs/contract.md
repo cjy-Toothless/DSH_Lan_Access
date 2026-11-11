@@ -66,7 +66,11 @@ Host handler 统一返回：
 - `listenHost`：空字符串表示自动探测局域网 IPv4；否则必须是本机具体网卡地址。
 - `listenPort`：整数 1024–65535。
 - Host 先持久化再重启监听；返回最新的 `status` 信封。校验失败返回 `ok:false`，且不改变既有监听器。
-- 开关切换过程中允许短暂 `running:false`。
+- **响应优先**：`update`/`restart` 的响应会先返回（`value.restarting: true`），监听器在约 300ms 后重启。
+  原因：设置页经局域网反代访问时，响应本身要经过被重启的监听器，提前关闭会让浏览器收到空响应
+  （Chromium `ERR_EMPTY_RESPONSE`）。Client 应在收到 `restarting` 后继续轮询 `status`。
+- 保存前会探测目标端口；若端口已被其它进程占用，直接返回 `ok:false`（不改变运行中的监听器）。
+- 延迟重启若仍失败，Host 会自动回滚到上一份可用配置并记录 `lastError`（`diagnostics.json` 的 `stage: rolled-back`）。
 
 ### 2.5 `restart`（无入参）
 
