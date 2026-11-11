@@ -17,7 +17,7 @@ import {
   RPC_STATUS,
   RPC_UPDATE,
 } from './contract.js';
-import { isIPv4Literal, listLanAddresses, pickLanAddress } from './network.js';
+import { isBindableListenHost, listLanAddresses, pickLanAddress } from './network.js';
 import { injectInsecureContextPolyfills } from './polyfills.js';
 import { startLanProxy, stripIpv6Brackets } from './proxy.js';
 import { qrSvgFor } from './qr.js';
@@ -248,8 +248,8 @@ async function setup(ctx, config) {
       log('warn', lastError);
       return;
     }
-    if (!isIPv4Literal(listenHost)) {
-      lastError = `监听地址不是合法的 IPv4：${listenHost}`;
+    if (!isBindableListenHost(listenHost)) {
+      lastError = `监听地址不是可绑定的具体 IPv4：${listenHost}`;
       log('error', lastError);
       return;
     }
@@ -282,6 +282,23 @@ async function setup(ctx, config) {
     await startListener();
   }
 
+  /**
+   * 串行化重启请求：多个页面并发点「保存/重启」时不会交叉 stop/start 泄漏旧监听器。
+   * @returns {Promise<void>} 本次重启完成。
+   */
+  let restartChain = Promise.resolve();
+  function queueRestart() {
+    const task = restartChain.then(
+      () => restartListener(),
+      () => restartListener(),
+    );
+    restartChain = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
+  }
+
   /** 先注册卸载清理：即使后续注册失败，监听器也会在插件卸载时释放。 */
   ctx.effect(() => () => stopListener(), 'dsh-lan-access.listener');
 
@@ -306,7 +323,7 @@ async function setup(ctx, config) {
     try {
       if (endpoint === RPC_STATUS) return success(buildStatus());
       if (endpoint === RPC_RESTART) {
-        await restartListener();
+        await queueRestart();
         return success(buildStatus());
       }
       if (endpoint === RPC_UPDATE) {
@@ -315,7 +332,7 @@ async function setup(ctx, config) {
         await saveSettings(validation.value);
         settings = validation.value;
         log('info', '设置已保存，正在重启局域网监听器');
-        await restartListener();
+        await queueRestart();
         return success(buildStatus());
       }
       return failure('bad-request', `未知 RPC 端点：${String(endpoint)}`);

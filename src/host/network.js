@@ -107,3 +107,19 @@ export function isIPv4Literal(value) {
   if (parts.length !== 4) return false;
   return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255);
 }
+
+/**
+ * 判断一个地址是否可以作为局域网监听地址。
+ * 拒绝通配/未指定（0.0.0.0）、广播、链路本地与组播地址；允许具体网卡地址与回环（自测）。
+ * @param {unknown} value - 待校验值。
+ * @returns {boolean} 是否可绑定。
+ */
+export function isBindableListenHost(value) {
+  if (!isIPv4Literal(value)) return false;
+  const address = value.trim();
+  if (address === '0.0.0.0' || address === '255.255.255.255') return false;
+  if (isLinkLocalIPv4(address)) return false;
+  const firstOctet = Number(address.split('.')[0]);
+  if (firstOctet >= 224) return false; // 组播（224/4）与保留段
+  return true;
+}

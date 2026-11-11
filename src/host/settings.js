@@ -16,7 +16,7 @@ import {
   SETTINGS_DIR,
   SETTINGS_FILE_NAME,
 } from './contract.js';
-import { isIPv4Literal } from './network.js';
+import { isBindableListenHost } from './network.js';
 
 /**
  * 解析 DSH 主目录。
@@ -56,7 +56,7 @@ export function normalizeSettings(raw, fallback = defaultSettings()) {
   const source = typeof raw === 'object' && raw !== null ? raw : {};
   const enabled = typeof source.enabled === 'boolean' ? source.enabled : fallback.enabled;
   const listenHost =
-    typeof source.listenHost === 'string' && (source.listenHost === '' || isIPv4Literal(source.listenHost))
+    typeof source.listenHost === 'string' && (source.listenHost === '' || isBindableListenHost(source.listenHost))
       ? source.listenHost
       : fallback.listenHost;
   const listenPort =
@@ -124,8 +124,8 @@ export function validateSettingsPatch(patch, current) {
   }
   if (patch.listenHost !== undefined) {
     if (typeof patch.listenHost !== 'string') return { ok: false, message: 'listenHost 必须是字符串' };
-    if (patch.listenHost !== '' && !isIPv4Literal(patch.listenHost)) {
-      return { ok: false, message: 'listenHost 必须是本机 IPv4 地址或空字符串（自动选择）' };
+    if (patch.listenHost !== '' && !isBindableListenHost(patch.listenHost)) {
+      return { ok: false, message: 'listenHost 必须是本机具体 IPv4 网卡地址（不能是 0.0.0.0/广播/链路本地），或空字符串（自动选择）' };
     }
     next.listenHost = patch.listenHost;
   }

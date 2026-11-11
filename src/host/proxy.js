@@ -182,6 +182,36 @@ function sendUpstream(state, request, path, headers) {
 }
 
 /**
+ * 校验入站请求的 Host/Origin 是否属于本代理自己的 authority。
+ *
+ * 目的：阻断 DNS rebinding —— 恶意网页把自己的域名解析到本机 LAN IP 后，
+ * 浏览器发出的请求 Host/Origin 仍是攻击者域名；若不校验，代理会把它当作
+ * 本机可信客户端并自动完成 launch-token 登录。只接受：
+ * - `<listenHost>:<port>`（手机实际访问地址）
+ * - `127.0.0.1:<port>` / `localhost:<port>`（本机自测）
+ * @param {http.IncomingMessage} request - 入站请求。
+ * @param {object} state - 代理状态。
+ * @returns {boolean} 是否允许转发。
+ */
+function isInboundAuthorityAllowed(request, state) {
+  const host = request.headers.host;
+  if (typeof host !== 'string' || host === '') return false;
+  if (!state.allowedAuthorities.has(host.toLowerCase())) return false;
+  const origin = request.headers.origin;
+  if (typeof origin === 'string' && origin !== '') {
+    try {
+      const url = new URL(origin);
+      const defaultPort = url.protocol === 'https:' ? '443' : '80';
+      const authority = `${url.hostname.toLowerCase()}:${url.port === '' ? defaultPort : url.port}`;
+      if (!state.allowedAuthorities.has(authority)) return false;
+    } catch (error) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * 给浏览器写一个纯文本错误响应。
  * @param {http.ServerResponse} response - 响应对象。
  * @param {number} status - 状态码。
@@ -206,6 +236,7 @@ function relayResponse(response, upstreamResponse, state) {
   response.writeHead(upstreamResponse.statusCode ?? 502, rewriteResponseHeaders(upstreamResponse.headers, state));
   upstreamResponse.pipe(response);
   upstreamResponse.on('error', () => response.destroy());
+  response.on('error', () => upstreamResponse.destroy());
   response.on('close', () => upstreamResponse.destroy());
 }
 
@@ -217,6 +248,11 @@ function relayResponse(response, upstreamResponse, state) {
  * @returns {Promise<void>} 处理完成。
  */
 async function handleHttpRequest(request, response, state) {
+  if (!isInboundAuthorityAllowed(request, state)) {
+    state.log?.('warn', `拒绝 Host/Origin 不匹配的入站请求：Host=${String(request.headers.host)}`);
+    writeText(response, 403, 'Forbidden: untrusted Host/Origin');
+    return;
+  }
   const parsed = parseRequestUrl(request.url);
   if (parsed === null) {
     writeText(response, 400, 'Bad Request');
@@ -255,6 +291,12 @@ async function handleHttpRequest(request, response, state) {
  * @param {object} state - 代理状态。
  */
 function handleUpgrade(request, socket, head, state) {
+  if (!isInboundAuthorityAllowed(request, state)) {
+    state.log?.('warn', `拒绝 Host/Origin 不匹配的 WebSocket 升级：Host=${String(request.headers.host)}`);
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   const parsed = parseRequestUrl(request.url);
   if (parsed === null) {
     socket.destroy();
@@ -315,6 +357,7 @@ export function createProxyServer(options) {
     agent: new http.Agent({ keepAlive: true }),
     upgradedSockets: new Set(),
     listeningSockets: new Set(),
+    allowedAuthorities: new Set(),
     maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
     baseListenHost: options.listenHost,
   };
@@ -390,6 +433,10 @@ export async function startLanProxy(options) {
   const boundPort = typeof address === 'object' && address !== null ? address.port : options.listenPort;
   const boundHost = options.listenHost;
   state.browserOrigin = `http://${urlHost(boundHost)}:${boundPort}`;
+  state.allowedAuthorities.clear();
+  for (const host of [boundHost, '127.0.0.1', 'localhost']) {
+    state.allowedAuthorities.add(`${urlHost(host)}:${boundPort}`.toLowerCase());
+  }
 
   return {
     host: boundHost,

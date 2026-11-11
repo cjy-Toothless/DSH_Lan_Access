@@ -54,15 +54,18 @@ function request(port, path, options = {}) {
  * 通过反代建立一次原始 WebSocket 握手并读取响应头。
  * @param {number} port - 反代端口。
  * @param {string} path - 路径。
+ * @param {{ hostHeader?: string, origin?: string }} [headers] - 覆盖的握手头。
  * @returns {Promise<string>} 上游返回的原始响应文本开头。
  */
-function rawUpgrade(port, path) {
+function rawUpgrade(port, path, headers = {}) {
   return new Promise((resolve, reject) => {
+    const hostHeader = headers.hostHeader ?? `127.0.0.1:${port}`;
+    const origin = headers.origin ?? `http://127.0.0.1:${port}`;
     const socket = net.connect(port, '127.0.0.1', () => {
       socket.write(
         `GET ${path} HTTP/1.1\r\n` +
-          'Host: 192.168.0.2:63004\r\n' +
-          'Origin: http://192.168.0.2:63004\r\n' +
+          `Host: ${hostHeader}\r\n` +
+          `Origin: ${origin}\r\n` +
           'Upgrade: websocket\r\n' +
           'Connection: Upgrade\r\n' +
           'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
@@ -72,14 +75,15 @@ function rawUpgrade(port, path) {
     let buffer = '';
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
-      if (buffer.includes('\r\n\r\n')) {
+      if (buffer.includes('\r\n\r\n') || buffer === '') {
         socket.destroy();
         resolve(buffer);
       }
     });
     socket.on('error', reject);
     socket.on('close', () => {
-      if (!buffer.includes('\r\n\r\n')) reject(new Error('upgrade 未收到完整响应头'));
+      if (!buffer.includes('\r\n\r\n') && buffer !== '') reject(new Error('upgrade 未收到完整响应头'));
+      else resolve(buffer);
     });
   });
 }
@@ -236,6 +240,36 @@ test('WebSocket 升级握手透传并改写 Host', async () => {
     const raw = await rawUpgrade(proxy.port, '/api/remote.mux');
     assert.match(raw, /HTTP\/1\.1 101/);
     assert.match(raw, /X-Upstream-Host: 127\.0\.0\.1:3080/);
+  } finally {
+    await proxy.close();
+    await new Promise((resolve) => upstream.server.close(resolve));
+  }
+});
+
+test('伪造 Host/Origin 的请求被 403 拒绝（DNS rebinding 防护）', async () => {
+  let upstreamHits = 0;
+  const upstream = await startUpstream((_req, res) => {
+    upstreamHits += 1;
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('should not reach here');
+  });
+  const proxy = await startLanProxy({
+    listenHost: '127.0.0.1',
+    listenPort: 0,
+    upstreamHost: '127.0.0.1',
+    upstreamPort: upstream.port,
+  });
+  try {
+    const forged = await request(proxy.port, '/', { headers: { host: 'attacker.example:63004' } });
+    assert.equal(forged.status, 403);
+    assert.equal(upstreamHits, 0);
+
+    const badOrigin = await request(proxy.port, '/', { headers: { origin: 'http://attacker.example' } });
+    assert.equal(badOrigin.status, 403);
+
+    const raw = await rawUpgrade(proxy.port, '/api/remote.mux', { hostHeader: 'attacker.example:63004' });
+    assert.ok(!raw.includes('101 Switching Protocols'));
+    assert.equal(upstreamHits, 0);
   } finally {
     await proxy.close();
     await new Promise((resolve) => upstream.server.close(resolve));

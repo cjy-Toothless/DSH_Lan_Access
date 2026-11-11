@@ -55,7 +55,7 @@
 ## 6. 集成确认点（与 Host 现状对齐）
 
 - Host `status` 已返回 `candidates`、`qrSvg`、`urls`、`warning`、`error`、`upstreamOrigin`；`qrSvg` 自带 `fill="white"` 背景矩形，深色主题下可扫描，Client 不覆盖二维码颜色。
-- 待确认：`status` 没有单独暴露「配置的监听地址」（只有实际绑定值），因此 Client 回填下拉框时默认按「自动」处理；若用户在 Host 侧显式指定过网卡地址，再次打开设置页下拉框会显示「自动」。建议契约补一个可选字段 `configuredListenHost`（空串 = 自动），Client 已兼容读取该字段，Host 补上即可。
+- 已解决：Host 的 `status` 已补充可选字段 `configuredListenHost`（空串 = 自动），Client 优先读取该字段回填下拉框；此前的"显式网卡地址重开设置页显示自动"问题已修复。
 - `applied` 后建议实测：插件管理里的标题/描述/图标、设置页状态圆点、二维码、URL 复制、开关/端口/地址保存反馈、免认证提示。
 
 ## 7. 静态校验

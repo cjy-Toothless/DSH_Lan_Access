@@ -86,4 +86,6 @@ test('validateSettingsPatch 拒绝非法补丁', () => {
   assert.equal(validateSettingsPatch({ listenPort: 80 }, current).ok, false);
   assert.equal(validateSettingsPatch({ listenPort: 3.14 }, current).ok, false);
   assert.equal(validateSettingsPatch({ listenHost: 'localhost' }, current).ok, false);
+  assert.equal(validateSettingsPatch({ listenHost: '0.0.0.0' }, current).ok, false);
+  assert.equal(validateSettingsPatch({ listenHost: '169.254.1.1' }, current).ok, false);
 });

@@ -20,7 +20,8 @@
 
 - channel：`/dsh-lan-access`
 - Client 调用形态（参考 `@smanx/dsh-proxy` 的 client）：`rpc.call(channel, endpoint, payload)`
-- Host 注册形态：`ctx.connection.rpc.handle(channel, handler)`
+- Host 注册形态：`connection.register(owner, channel, handler)`，`owner` 必须是注入了 `webServer` 的插件上下文
+  （`connection.rpc.handle` 的 owner 解析不可控，禁止使用；详见 §6）
 
 ### 2.1 URL 与二维码
 

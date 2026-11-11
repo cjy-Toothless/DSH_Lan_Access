@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { isIPv4Literal, isLinkLocalIPv4, isPrivateIPv4, listLanAddresses } from '../../src/host/network.js';
+import { isBindableListenHost, isIPv4Literal, isLinkLocalIPv4, isPrivateIPv4, listLanAddresses } from '../../src/host/network.js';
 
 test('isIPv4Literal 接受合法字面量并拒绝非法输入', () => {
   assert.equal(isIPv4Literal('192.168.0.2'), true);
@@ -25,6 +25,17 @@ test('isPrivateIPv4 只认可 RFC1918 网段', () => {
 test('isLinkLocalIPv4 识别 169.254/16', () => {
   assert.equal(isLinkLocalIPv4('169.254.1.1'), true);
   assert.equal(isLinkLocalIPv4('192.168.1.1'), false);
+});
+
+test('isBindableListenHost 拒绝通配/广播/链路本地/组播，接受具体网卡与回环', () => {
+  assert.equal(isBindableListenHost('192.168.0.2'), true);
+  assert.equal(isBindableListenHost('10.0.0.5'), true);
+  assert.equal(isBindableListenHost('127.0.0.1'), true);
+  assert.equal(isBindableListenHost('0.0.0.0'), false);
+  assert.equal(isBindableListenHost('255.255.255.255'), false);
+  assert.equal(isBindableListenHost('169.254.10.20'), false);
+  assert.equal(isBindableListenHost('239.1.2.3'), false);
+  assert.equal(isBindableListenHost('not-an-ip'), false);
 });
 
 test('listLanAddresses 返回字符串数组且不含回环/link-local', () => {

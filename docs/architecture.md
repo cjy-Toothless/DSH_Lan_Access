@@ -77,7 +77,7 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
 ### 4.5 设置与 RPC
 
 - 设置写入 `$DSH_HOME/lan-access/settings.json`（临时文件 + `rename` 原子替换）；
-- Host 通过 `ctx.connection.rpc.handle('/dsh-lan-access', handler)` 暴露 `status` / `update` / `restart`；
+- Host 通过 `connection.register(owner, '/dsh-lan-access', handler)`（owner = 已注入 `webServer` 的上下文）暴露 `status` / `update` / `restart`；
 - Client 通过 `ctx.connection.rpc.call(...)` 调用，契约见 `docs/contract.md`；
 - 修改端口/开关后 Host 立即重启监听器（无需重启 DSH），返回最新状态。
 
@@ -87,6 +87,9 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
 - 上游不可达 → 502；
 - 反代只连接 `ctx.webServer.getOrigin()` 给出的回环上游，用户无法改变上游（防 SSRF）；
 - 请求路径必须 `/` 开头；请求头由 Node 校验，改写值均为常量或同源 prefix 替换；
+- **入站 Host/Origin 校验**：只接受本代理自身 authority（监听 IP:端口 / 127.0.0.1:端口 / localhost:端口），
+  其余返回 403（含 WebSocket 升级），用于阻断 DNS rebinding 放大自动 token 登录；监听地址拒绝 `0.0.0.0`/广播/链路本地；
+- **重启串行化**：`update`/`restart` 经同一个 Promise 队列串行执行，避免并发 stop/start 泄漏监听器；
 - **免认证暴露面**：当前无额外认证，等效于把 DSH 暴露给同局域网；总开关默认开启但可在设置页关闭，风险提示常驻设置页。
 
 ## 6. 插件加载安全契约（事故后强制约束）
