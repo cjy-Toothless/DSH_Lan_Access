@@ -6,6 +6,23 @@
   "type": "module",
   "main": "src/host/index.js",
   "license": "MIT",
+  "author": "dsh-lan-access contributors",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "bundle",
+    "lan",
+    "reverse-proxy",
+    "remote-access"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/unit tests/integration",
+    "check": "node --check src/host/index.js && node --check src/host/proxy.js && node --check src/host/settings.js && node --check src/host/network.js && node --check src/host/polyfills.js && node --check src/host/qr.js && node --check src/host/token.js && node --check src/host/contract.js && node --check src/client/client.js"
+  },
   "exports": {
     ".": "./src/host/index.js",
     "./client": "./src/client/client.js",
