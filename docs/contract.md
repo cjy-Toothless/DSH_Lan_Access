@@ -13,6 +13,8 @@
 | 设置页 slot | `settings.section`，注册 id 固定为 `lan-access` |
 | Client locale 命名空间 | `lan-access` |
 | 持久化文件 | `$DSH_HOME/lan-access/settings.json`（Host 独占读写） |
+| 插件展示元数据 | `locale/zh.json` / `locale/en.json` 的 `meta.title` / `meta.description` |
+| 插件图标 | `exports["./icon"]` → `assets/icon.svg`；`<img>` 渲染，必须显式彩色，禁止 `currentColor` |
 
 ## 2. Connection RPC
 

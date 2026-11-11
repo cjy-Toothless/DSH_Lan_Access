@@ -2,7 +2,7 @@
 
 > 让手机浏览器在局域网内直接打开并使用**电脑上的 DSH**（DeepSeek Harness 桌面版）——扫码即用，无需改 DSH 源码、无需单独进程。
 
-**项目状态**：v0.1 已实现、安装并完成端到端验证（2026-11-11，DSH 0.2.2-rc.1 桌面版）。本插件为本地 DSH bundle，按仓库内 `docs/contract.md` 契约实现；开发中曾因插件加载方式错误导致宿主崩溃，根因与修复约束见 [`docs/adr/0002-safe-plugin-loading.md`](docs/adr/0002-safe-plugin-loading.md)，**修改 `src/host/index.js` 的加载逻辑前务必先读**。
+**项目状态**：v0.1 已实现、安装，并在真实 DSH 0.2.2-rc.1 桌面版与 Android 手机上完成端到端验证（2026-11-12）。本插件为本地 DSH bundle，按仓库内 `docs/contract.md` 契约实现；开发中曾因插件加载方式错误导致宿主崩溃，根因与修复约束见 [`docs/adr/0002-safe-plugin-loading.md`](docs/adr/0002-safe-plugin-loading.md)，**修改 `src/host/index.js` 的加载逻辑前务必先读**。
 
 ---
 
@@ -24,16 +24,19 @@ DSH 桌面版出于安全考虑，把浏览器入口硬编码在 `127.0.0.1` 的
 - **非安全上下文 polyfill**：局域网 HTTP 下浏览器缺少 `crypto.randomUUID`、`navigator.clipboard`，插件会向页面注入幂等 polyfill，避免实时功能报错。
 - **入站 Host/Origin 校验**：代理只接受指向自身监听 authority（`<监听IP>:<端口>`、`127.0.0.1:<端口>`、`localhost:<端口>`）的请求，阻断 DNS rebinding 类攻击；监听地址拒绝 `0.0.0.0`/广播/链路本地，只绑定具体网卡。
 - **零第三方运行时依赖**（仅 vendored MIT 二维码生成器），Host 代码可审计。
+- **完整的插件展示信息**：插件管理器读取导出的 `locale/*.json`（标题/描述）与 `assets/icon.svg`（显式彩色图标），深浅主题下均清晰可辨。
 - **生命周期托管**：随 DSH 启停，插件卸载即关闭监听与全部连接；监听失败只影响本插件，不阻塞 DSH 启动。
 
-## 已验证（2026-11-11，真实 DSH 0.2.2-rc.1 桌面版）
+## 已验证（2026-11-12，真实 DSH 0.2.2-rc.1 桌面版）
 
 - 局域网 `GET http://<LAN-IP>:63004/` → **303 + Set-Cookie**（HttpOnly / SameSite=Strict，audience 固定 `127.0.0.1:3080`，30 天）；
 - 携带 Cookie 再访问 → 200 HTML（完整 DSH 外壳），并注入 `__DSH_LAN_ACCESS_POLYFILL__`；
 - WebSocket `/api/remote.mux` 升级 → `101 Switching Protocols`；
 - 静态资源与设置页 client bundle 经反代可访问；设置页 `lan-access` 已在运行中的 DSH 页面注册为 active；
+- **真实手机验证**：Android 17 / Chrome 156 经 `http://192.168.0.2:63004/` 打开完整界面，`/api` 请求全部 200、设置页可正常读写；
+- 插件管理器展示标题、描述与图标（`data:` URL，卡片 36px / 行 30px）；
 - 桌面端自身回环监听不受影响；
-- 卸载/停用后监听器关闭（`node --test` 30 用例 + 真实 Cordis/Loader 加载验证全绿）。
+- 卸载/停用后监听器关闭（`node --test tests/unit tests/integration` 32 用例 + 真实 Cordis/Loader 加载验证全绿）。
 
 ## ⚠️ 安全模型（必读）
 
@@ -122,14 +125,14 @@ New-NetFirewallRule -DisplayName "DSH LAN Access 63004" -Direction Inbound -Loca
 
 ```text
 dsh-lan-access/
-├── package.json            # bundle 清单（dsh.bundle.patch + dsh.client）
+├── package.json            # bundle 清单（dsh.bundle.patch + dsh.client + 导出资源）
 ├── cordis.patch.yml        # 插入 Host 插件行（id: lan-access）
 ├── src/
 │   ├── host/               # Host 侧：入口、反代、设置、探测、polyfill、二维码
 │   ├── client/             # 浏览器侧：设置页（module-loader bundle）
 │   └── vendor/             # 第三方源码（qrcode-generator，MIT，含 NOTICE）
-├── locale/                 # 插件管理展示用元数据（zh/en）
-├── assets/icon.svg         # 插件图标
+├── locale/                 # 插件管理器展示元数据（meta.title / meta.description，zh/en）
+├── assets/icon.svg         # 插件图标（36×36，显式彩色，供 <img> 渲染）
 ├── docs/                   # 契约、架构、ADR
 └── tests/                  # node --test 单元/集成测试
 ```
@@ -137,11 +140,13 @@ dsh-lan-access/
 ## 开发与测试
 
 ```powershell
-node --check src/host/index.js          # 语法检查
-node --test tests/unit                  # 单元 + 代理集成测试（29+ 用例）
+npm test        # node --test tests/unit tests/integration（32 用例）
+npm run check   # node --check：全部 Host/Client 源码语法检查
 ```
 
-设计与接口见 [`docs/contract.md`](docs/contract.md)、[`docs/architecture.md`](docs/architecture.md)。
+- 修改 Host 源码后需重载插件（或重启 DSH）才生效；只改 Client 代码可通过插件管理器停用/启用 bundle 触发热重载。
+- 修改 `assets/icon.svg` 后刷新插件管理器页面即可看到新图标（元数据在每次读取时从磁盘重新生成 `data:` URL）。
+- 设计与接口见 [`docs/contract.md`](docs/contract.md)、[`docs/architecture.md`](docs/architecture.md)。
 
 ## 已知限制 / Roadmap
 

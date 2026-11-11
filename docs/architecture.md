@@ -83,6 +83,14 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
   可能经局域网反代访问，`update`/`restart` 会先返回响应、再由约 300ms 后的延迟任务重启监听器，
   否则关闭监听器会切断正在返回的响应，浏览器得到 `ERR_EMPTY_RESPONSE`；延迟重启失败会自动回滚配置。
 
+### 4.6 插件管理器中的展示元数据与图标
+
+插件卡片/行由 DSH 插件管理器渲染，展示信息全部来自本包导出的静态资源（不激活 Host/Client 也会读取）：
+
+- **标题与描述**：`locale/zh.json`、`locale/en.json` 的 `meta.title` / `meta.description`；缺失字段回退到 `package.json` 的 `name` / `description`。
+- **图标**：`package.json` 的 `exports["./icon"]` 指向 `assets/icon.svg`；DSH 读取文件后转成 `data:image/svg+xml;base64,...`，限制 256 KiB，且必须留在包目录内。
+- 管理器用 `<img>`（卡片 36px、行 30px，`object-fit: contain`）渲染图标，因此图标**必须是自包含的显式颜色**：`currentColor` 在 `<img>` 中解析为黑色，深色主题下几乎不可见；也不依赖主题 token 切换，这是 `<img>` 展示的固有限制。当前图标为蓝色渐变圆角底 + 白色手机/Wi-Fi 图形，在深浅主题下都有足够对比度。
+
 ## 5. 失败与安全
 
 - 监听失败（端口占用、无局域网地址）→ 状态页显示可读原因，不抛出到 DSH 启动流程；
@@ -116,9 +124,34 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
 5. **验证方式**：除 `node --test` 外，必须用真实 Cordis 4.1.0 + Loader 1.1.0 的独立 harness 验证
    "apply 返回 undefined、entry 立即 active、监听器异步就绪、卸载释放端口"（脚本在 `Data Cache/.../repro-cordis/`）。
 
-## 7. 验证记录（2026-11-11）
+## 7. 验证记录（2026-11-12）
 
-- `node --test tests/unit tests/integration`：30 用例全绿（含代理 HTTP/WS、token 自动登录、设置持久化、Host 插件集成）。
+- `node --test tests/unit tests/integration`：32 用例全绿（含代理 HTTP/WS、token 自动登录、设置持久化、Host 插件集成）。
 - 真实 DSH 桌面版端到端 10/10：303+Set-Cookie、带 Cookie 200 HTML、polyfill、静态资源、client bundle、WS 101、桌面回环未受影响。
+- 真实手机（Android 17 / Chrome 156，`192.168.0.3`）经局域网反代访问：入口 303→Cookie→200，`/api` 请求全部 200、WebSocket 正常；证据见 `$DSH_HOME/lan-access/requests.log`（远端 IP、Host、UA、状态码）。
 - 设置页 slot：`settings.section` occupants 含 `{ id: 'lan-access', order: 60, active: true }`（运行中的页面已热加载）。
+- 展示元数据：插件管理器读取 `locale/*.json` 的 `meta.title` / `meta.description` 与导出的 `assets/icon.svg`（`data:` URL）；图标为 36×36 viewBox 的显式彩色资源，渲染尺寸 36px（卡片）/ 30px（行）。
 - 稳定性：重新启用后无新增 `crash-*-host.log`，DSH 持续可用。
+
+## 8. 设置页（Client）实现要点
+
+> 接口契约见 [`contract.md`](contract.md)，本节目的是记录实现层面的约定与主题 token 映射。
+
+- **状态机**：`loading` → `ready` / `error`；`ready` 后每 5 秒轮询 `status`，轮询失败只提示「后台刷新失败」，不清空已有数据；表单草稿只在首次加载成功与写操作成功后回填，轮询不覆盖正在输入的内容。
+- **错误处理**：`enabled:false` 灰点「已停用」；`enabled && running` 绿点「运行中」；`enabled && !running` 红点「启动失败」并展示 `status.error`；`ok:true` 但 `running:false` 时提示「已保存，但监听器未能启动」。
+- **复制回退**：安全上下文用 `navigator.clipboard`，局域网 HTTP 用隐藏 textarea + `execCommand('copy')`，失败显示可读提示（`console.warn`，不静默吞异常）。
+- **图标**：设置页内的空状态/警示图标是内联 SVG，使用 `currentColor` 跟随主题；导出的 `assets/icon.svg` 必须显式彩色（见 §4.6）。
+- **样式作用域**：组件内 `<style>` 字符串，类名统一 `lan-access-` 前缀；卸载随组件移除。
+- **主题 token 映射**（禁止硬编码深浅色）：
+
+| 用途 | token |
+|---|---|
+| 卡片面 / 描边 | `--dsw-alias-settings-card-fill` / `--dsw-alias-settings-card-stroke` |
+| 文本三级 | `--dsw-alias-label-primary` / `-secondary` / `-tertiary` |
+| 主按钮 | `--dsw-alias-button-primary-fill` / `-primary-hover` / `--dsw-alias-label-primary-foreground` |
+| 次按钮 | `--dsw-alias-button-elevated-fill` / `--dsw-alias-interactive-bg-hover` |
+| 输入框 | `--dsw-specific-input-major` / `--dsw-alias-border-l2` |
+| 开关 | `--dsw-alias-switch-thumb` / `--dsw-alias-button-primary-fill` / `--dsw-alias-border-l3` |
+| 状态 | `--dsw-alias-state-success-primary` / `-error-primary` / `-idle-primary` / `-warn-primary` / `-warn-secondary` / `-warn-tertiary` / `-warn-label` |
+| 焦点环 | `--dsw-focus-ring-color`（回落 `--dsw-alias-state-business-primary`）/ `--dsw-focus-ring-width` |
+| 圆角 / 字号 | `--dsw-radius-sm\|md\|lg`、`--dsw-font-xs-13-*` / `-s-14-*` / `-m-18-*` / `-xxs-12-*` |
