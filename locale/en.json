@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "LAN access",
+    "description": "Open the DSH web interface to phone browsers on the same network, with QR pairing and configurable port and network interface."
+  }
+}

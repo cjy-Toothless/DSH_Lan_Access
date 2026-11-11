@@ -1,0 +1,11 @@
+# dsh-lan-access bundle patch：插入局域网反向代理 Host 插件。
+#
+# 卸载：由插件管理器移除本 bundle。
+# 临时停用：在 profile 的 cordis.patch.yml 追加
+#   - id: lan-access
+#     disabled: true
+# 修改监听地址/端口等运行参数：DSH 设置 → 局域网访问（持久化到
+# $DSH_HOME/lan-access/settings.json，不影响本文件）。
+- insert:
+    - id: lan-access
+      name: '@local/dsh-lan-access'

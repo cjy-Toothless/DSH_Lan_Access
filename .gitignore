@@ -1,0 +1,16 @@
+# 依赖与构建产物
+node_modules/
+coverage/
+dist/
+
+# 本地/敏感数据
+.env
+.env.*
+!.env.example
+*.log
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
