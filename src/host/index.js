@@ -18,7 +18,7 @@ import {
   RPC_STATUS,
   RPC_UPDATE,
 } from './contract.js';
-import { isBindableListenHost, listLanAddresses, pickLanAddress } from './network.js';
+import { isBindableListenHost, listLanAddresses, pickLanAddress, shouldRebindListener } from './network.js';
 import { injectInsecureContextPolyfills } from './polyfills.js';
 import { startLanProxy, stripIpv6Brackets, closeOrphanedListeners } from './proxy.js';
 import { qrSvgFor } from './qr.js';
@@ -405,8 +405,65 @@ async function setup(ctx, config) {
     pendingRestartTimer.unref?.();
   }
 
+  /** 监听地址巡检间隔（毫秒）：网卡换 IP 后自动恢复监听。 */
+  const ADDRESS_WATCH_INTERVAL_MS = 5000;
+  /** 监听器缺失时的最小重试间隔（毫秒）：避免持续失败时反复刷日志。 */
+  const LISTENER_RETRY_INTERVAL_MS = 30000;
+
+  /** 上次尝试启动监听器的时间戳（毫秒），用于失败退避。 */
+  let lastStartAttemptAt = Date.now();
+  /** 地址巡检定时器句柄。 */
+  let addressWatchTimer = null;
+
+  /**
+   * 巡检本机局域网地址，必要时重新绑定监听器。
+   *
+   * 为什么需要：监听器绑定的是具体网卡 IPv4，而 DHCP 会换地址（路由器重启、
+   * Wi-Fi 断线重连、开关 Clash TUN/系统代理触发的网络重置等）。旧地址失效后
+   * 监听器变成「看起来在跑、实际收不到包」的僵尸状态——手机连不上，但 DSH 一切正常，
+   * 用户只能手动点「重启监听」。这里发现漂移即自动重绑。
+   * @returns {Promise<void>} 巡检完成。
+   */
+  async function checkListenAddress() {
+    if (!settings.enabled) return;
+    const candidates = listLanAddresses();
+    if (listener === null) {
+      const target = settings.listenHost !== '' ? settings.listenHost : candidates[0] ?? '';
+      // 目标地址尚未就绪（例如 Wi-Fi 还在重连）时不空转重试。
+      if (target === '' || candidates.includes(target) === false) return;
+      const now = Date.now();
+      if (now - lastStartAttemptAt < LISTENER_RETRY_INTERVAL_MS) return;
+      lastStartAttemptAt = now;
+      await startListener();
+      return;
+    }
+    if (settings.listenHost !== '') return; // 手动指定的地址由用户负责，不自动漂移
+    if (shouldRebindListener(listener.host, candidates) === false) return;
+    const target = candidates[0] ?? '';
+    if (target === '') {
+      log('warn', `本机已没有可用的局域网地址（原监听 ${listener.host}:${listener.port}），等待网络恢复`);
+      return;
+    }
+    log('warn', `本机局域网地址已变化（${listener.host} → ${target}），正在自动重新监听`);
+    await queueRestart();
+  }
+
   /** 先注册卸载清理：即使后续注册失败，监听器也会在插件卸载时释放。 */
   ctx.effect(() => () => stopListener(), 'dsh-lan-access.listener');
+
+  /** 网络地址巡检：随插件卸载停止。 */
+  ctx.effect(() => {
+    addressWatchTimer = setInterval(() => {
+      void checkListenAddress().catch((error) => {
+        log('warn', `局域网地址巡检失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, ADDRESS_WATCH_INTERVAL_MS);
+    addressWatchTimer.unref?.();
+    return () => {
+      if (addressWatchTimer !== null) clearInterval(addressWatchTimer);
+      addressWatchTimer = null;
+    };
+  }, 'dsh-lan-access.address-watch');
 
   /** 向所有 index.html 注入非安全上下文 polyfill（失败不影响反向代理）。 */
   try {
@@ -417,6 +474,7 @@ async function setup(ctx, config) {
 
   /** 首次启动：startListener 内部会写诊断快照。 */
   await startListener();
+  lastStartAttemptAt = Date.now();
 
   /**
    * Connection RPC 处理器。

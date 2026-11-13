@@ -97,6 +97,22 @@ export function pickLanAddress() {
 }
 
 /**
+ * 判断当前监听地址是否已经失效、需要重新绑定。
+ *
+ * 监听器绑定的是一块具体网卡的 IPv4，DHCP 换地址（路由器重启、Wi-Fi 断线重连、
+ * 开关 Clash TUN/系统代理引发的网络重置等）后旧地址不再属于本机，监听器会变成
+ * 「看起来在跑、实际收不到任何包」的僵尸状态。
+ * @param {string} listenerHost - 监听器当前绑定的地址。
+ * @param {string[]} candidates - 当前可用的局域网地址（建议传入已排序的 `listLanAddresses()` 结果）。
+ * @returns {boolean} 需要重新绑定时返回 true；地址非法或仍在候选列表中返回 false。
+ */
+export function shouldRebindListener(listenerHost, candidates) {
+  if (!isIPv4Literal(listenerHost)) return false;
+  const host = listenerHost.trim();
+  return candidates.includes(host) === false;
+}
+
+/**
  * 校验一个字符串是否是合法的 IPv4 字面量。
  * @param {unknown} value - 待校验值。
  * @returns {boolean} 是否合法。

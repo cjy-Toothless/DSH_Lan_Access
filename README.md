@@ -4,7 +4,7 @@
 
 **仓库**：<https://github.com/cjy-Toothless/DSH_Lan_Access>
 
-**项目状态**：v0.1 已实现、安装，并在真实 DSH 0.2.2-rc.1 桌面版与 Android 手机上完成端到端验证（2026-11-12）。本插件为本地 DSH bundle，按仓库内 `docs/contract.md` 契约实现；开发中曾因插件加载方式错误导致宿主崩溃，根因与修复约束见 [`docs/adr/0002-safe-plugin-loading.md`](docs/adr/0002-safe-plugin-loading.md)，**修改 `src/host/index.js` 的加载逻辑前务必先读**。
+**项目状态**：v0.1.1 已实现、安装，并在真实 DSH 0.2.2-rc.1 桌面版与 Android 手机上完成端到端验证（2026-11-12）；2026-11-13 修复「DHCP 换 IP 后监听器失效、手机连不上」，改为自动跟随网卡地址。本插件为本地 DSH bundle，按仓库内 `docs/contract.md` 契约实现；开发中曾因插件加载方式错误导致宿主崩溃，根因与修复约束见 [`docs/adr/0002-safe-plugin-loading.md`](docs/adr/0002-safe-plugin-loading.md)，**修改 `src/host/index.js` 的加载逻辑前务必先读**。
 
 ---
 
@@ -22,6 +22,7 @@ DSH 桌面版出于安全考虑，把浏览器入口硬编码在 `127.0.0.1` 的
 
 - **HTTP + WebSocket 全协议透传**：`/api` RPC、事件流、插件静态资源、文件上传/下载、SSE 均走同一入口，不缓冲、支持背压。
 - **扫码即用**：设置页显示二维码与可复制地址；自动探测本机局域网 IPv4（并可从下拉框手动选择）。
+- **监听地址自动跟随网卡变化**：DHCP 换 IP（路由器重启、Wi-Fi 断线重连、开关 Clash TUN/系统代理触发的网络重置等）后，5 秒内自动重新监听新地址，不需要手动点「重启监听」或重启 DSH；地址变化时二维码与地址同步刷新。
 - **原生认证复用**：不实现第二套登录，直接把 DSH 的 launch token 换成签名 Cookie；桌面版重启后端口变化也不影响已登录设备（固定回环权威，见架构文档）。
 - **非安全上下文 polyfill**：局域网 HTTP 下浏览器缺少 `crypto.randomUUID`、`navigator.clipboard`，插件会向页面注入幂等 polyfill，避免实时功能报错。
 - **入站 Host/Origin 校验**：代理只接受指向自身监听 authority（`<监听IP>:<端口>`、`127.0.0.1:<端口>`、`localhost:<端口>`）的请求，阻断 DNS rebinding 类攻击；监听地址拒绝 `0.0.0.0`/广播/链路本地，只绑定具体网卡。
@@ -122,6 +123,7 @@ New-NetFirewallRule -DisplayName "DSH LAN Access 63004" -Direction Inbound -Loca
 | 设置页显示「未发现可用局域网 IPv4」 | 电脑未联网/仅有虚拟网卡；接 Wi-Fi 或网线后点「重启监听」 |
 | 「监听 xxx:63004 失败：EADDRINUSE」 | 端口被占用：换端口，或 `netstat -ano | findstr :63004` 找到并结束占用进程 |
 | 手机打开空白/一直转圈 | 手机与电脑不同网段/开了独立 VPN；先 `ping 电脑IP` 验证连通，再检查防火墙 |
+| 昨天能连、今天连不上，且手机 `ping` 不通电脑 | 电脑 DHCP 换了 IP（路由器重启、Wi-Fi 重连、开关 Clash 等都会触发），旧地址上已没有监听器。v0.1.1 起会在 5 秒内自动重绑，刷新设置页拿新二维码即可；若设置页手动指定过 `listenHost`，改为「自动」或重新选当前地址 |
 | 保存设置后页面报 `ERR_EMPTY_RESPONSE`（旧版本问题，已修复） | 原因是响应还没写回浏览器，监听器就被重启了。更新到最新版本后：先返回响应、约 300ms 后再重启；保存成功后保持页面打开数秒即可 |
 | 保存时提示「端口已被占用」 | 换一个端口。该端口可能被其它程序或历史残留实例占用；重启 DSH 可清理历史残留监听 |
 | 手机提示 401 / 需要重新登录 | 等待自动跳转；若仍失败，刷新页面。DSH 重启后旧 Cookie 通常仍有效（端口固定为回环权威） |
@@ -159,6 +161,7 @@ npm run check   # node --check：全部 Host/Client 源码语法检查
 - v0.1 **无访问认证**（见安全模型）；规划：访问密码 + 扫码配对 + 撤销设备。
 - 仅 HTTP（局域网明文，非安全上下文）；规划：可选自签/自有证书 TLS。
 - 只监听 IPv4；IPv6-only 局域网暂不支持。
+- 自动跟随网卡地址只对「自动选择」生效；手动指定 `listenHost` 时不自动漂移（避免与用户意图冲突）。
 - 桌面版端口变化已通过固定回环权威规避，但若 DSH 未来更改 Host/Cookie 规则需回归测试。
 
 ## 许可

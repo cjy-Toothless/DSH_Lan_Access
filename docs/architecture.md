@@ -91,6 +91,15 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
 - **图标**：`package.json` 的 `exports["./icon"]` 指向 `assets/icon.svg`；DSH 读取文件后转成 `data:image/svg+xml;base64,...`，限制 256 KiB，且必须留在包目录内。
 - 管理器用 `<img>`（卡片 36px、行 30px，`object-fit: contain`）渲染图标，因此图标**必须是自包含的显式颜色**：`currentColor` 在 `<img>` 中解析为黑色，深色主题下几乎不可见；也不依赖主题 token 切换，这是 `<img>` 展示的固有限制。当前图标为蓝色渐变圆角底 + 白色手机/Wi-Fi 图形，在深浅主题下都有足够对比度。
 
+### 4.7 监听地址跟随网卡变化
+
+监听器绑定的是**具体网卡 IPv4**（不是 `0.0.0.0`，见 §5 安全约束），因此本机地址一旦变化，监听器就不会再收到任何入站包：
+
+- 触发场景：路由器重启/DHCP 租约变更、Wi-Fi 断线重连、笔记本休眠唤醒、开关 Clash TUN 或系统代理引发的网络重置；
+- 症状：DSH 本体一切正常，设置页仍显示「运行中」，但手机访问旧地址被拒/超时，且 `requests.log` 里完全没有手机 IP 的入站记录；
+- 处理：`index.js` 每 5 秒巡检一次 `listLanAddresses()`，用 `shouldRebindListener()` 判断当前绑定地址是否已不属于本机，失效则 `queueRestart()` 重绑到当前首选地址并刷新诊断快照、设置页地址与二维码；
+- 边界：只对「自动选择」模式生效；用户手动指定 `listenHost` 时不自动漂移。监听器缺失时按 30 秒退避重试启动。
+
 ## 5. 失败与安全
 
 - 监听失败（端口占用、无局域网地址）→ 状态页显示可读原因，不抛出到 DSH 启动流程；
@@ -126,7 +135,7 @@ DSH 自身监听器  127.0.0.1:<随机端口> （dsh-host-webserver + frontend-s
 
 ## 7. 验证记录（2026-11-12）
 
-- `node --test tests/unit tests/integration`：32 用例全绿（含代理 HTTP/WS、token 自动登录、设置持久化、Host 插件集成）。
+- `node --test tests/unit tests/integration`：33 用例全绿（含代理 HTTP/WS、token 自动登录、设置持久化、地址失效判定、Host 插件集成）。
 - 真实 DSH 桌面版端到端 10/10：303+Set-Cookie、带 Cookie 200 HTML、polyfill、静态资源、client bundle、WS 101、桌面回环未受影响。
 - 真实手机（Android 17 / Chrome 156，`192.168.0.3`）经局域网反代访问：入口 303→Cookie→200，`/api` 请求全部 200、WebSocket 正常；证据见 `$DSH_HOME/lan-access/requests.log`（远端 IP、Host、UA、状态码）。
 - 设置页 slot：`settings.section` occupants 含 `{ id: 'lan-access', order: 60, active: true }`（运行中的页面已热加载）。

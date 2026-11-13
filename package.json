@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-lan-access",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "DSH 局域网访问插件：在桌面版进程内提供 HTTP/WebSocket 反向代理，手机浏览器可直接使用 DSH Web GUI。",
   "type": "module",

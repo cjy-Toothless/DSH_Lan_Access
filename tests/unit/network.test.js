@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { isBindableListenHost, isIPv4Literal, isLinkLocalIPv4, isPrivateIPv4, listLanAddresses } from '../../src/host/network.js';
+import {
+  isBindableListenHost,
+  isIPv4Literal,
+  isLinkLocalIPv4,
+  isPrivateIPv4,
+  listLanAddresses,
+  shouldRebindListener,
+} from '../../src/host/network.js';
 
 test('isIPv4Literal 接受合法字面量并拒绝非法输入', () => {
   assert.equal(isIPv4Literal('192.168.0.2'), true);
@@ -47,4 +54,18 @@ test('listLanAddresses 返回字符串数组且不含回环/link-local', () => {
     assert.ok(!address.startsWith('127.'));
     assert.ok(!isLinkLocalIPv4(address));
   }
+});
+
+test('shouldRebindListener 识别监听地址失效（DHCP 换 IP 后自动重绑）', () => {
+  // 地址仍在：无需重绑
+  assert.equal(shouldRebindListener('192.168.0.2', ['192.168.0.2', '10.0.0.5']), false);
+  // 地址已不属于本机：需要重绑
+  assert.equal(shouldRebindListener('192.168.0.2', ['192.168.0.3']), true);
+  // 完全断网：需要重绑（由上层等网络恢复）
+  assert.equal(shouldRebindListener('192.168.0.2', []), true);
+  // 首尾空白容错
+  assert.equal(shouldRebindListener(' 192.168.0.3 ', ['192.168.0.3']), false);
+  // 非法地址不做判断，避免误触发
+  assert.equal(shouldRebindListener('not-an-ip', []), false);
+  assert.equal(shouldRebindListener('', ['192.168.0.3']), false);
 });
