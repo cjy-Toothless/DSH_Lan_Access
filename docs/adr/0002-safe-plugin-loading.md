@@ -39,7 +39,7 @@
 2. **设置页 RPC 只走 `connection.register(owner, channel, handler)`**，owner 使用已注入 `webServer` 的上下文；
    不再使用 `connection.rpc.handle`，注册失败只降级为设置页不可用。
 3. **验证流程升级**：除单元测试外，新增基于真实 `@deepseek-ai/cordis@4.1.0` + `@deepseek-ai/cordis-plugin-loader@1.1.0`
-   的独立 harness（`Data Cache/20261111-dsh-lan-access/repro-cordis/verify-host.mjs`），断言
+   的独立 harness（[`scripts/verify-host.mjs`](../scripts/verify-host.mjs)），断言
    "apply 返回 undefined / entry 10ms 内 active / 监听器异步就绪 / 卸载释放端口 / RPC 路由注册成功"。
    在 live profile 启用前必须先跑绿。
 4. **恢复预案**：从 profile 的 `dsh.profile.bundles` 移除 `@local/dsh-lan-access` 并重启，即可隔离故障插件。

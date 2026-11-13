@@ -103,7 +103,7 @@ Host handler 统一返回：
 
 ## 5. Client 模块包装格式（必须与示例一致）
 
-参考 `Data Cache/20261111-dsh-lan-access/research/dsh-proxy/package/dsh-proxy/lib/client.js`：
+参考 `dsh-proxy` 插件 npm 包内的 `lib/client.js`（原调研副本位于 `Data Cache/20261111-dsh-lan-access/`，2026-11-13 随临时区清理删除，需要时从该包重新解出）：
 
 ```js
 window.__ModuleLoader__.load({
